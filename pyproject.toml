@@ -9,7 +9,7 @@ authors = [{ name = "Efebia.com" }]
 # travel with the package and not only with the repo.
 license = "MIT"
 license-files = ["LICENSE"]
-# ytm pins >=3.14 because it runs on a single machine. Here the users are
+# A tool running on a single machine could pin >=3.14. Here the users are
 # colleagues, on hardware we do not choose: onnxruntime (a hard dependency of
 # faster-whisper, used by the VAD) has stopped publishing macOS x86_64 wheels,
 # so an Intel Mac has no valid combination on 3.14. The 3.11 floor leaves them

@@ -8,8 +8,8 @@ from pathlib import Path
 def _state_dir() -> Path:
     """Where sbobina keeps logs and models, following each OS convention.
 
-    ytm can hardcode ~/.config/ytm because it only ever runs on Linux. Not here:
-    on Windows ~/.config is a directory that means nothing to anyone (and that no
+    A tool that only ever runs on Linux can hardcode ~/.config. Not here: on
+    Windows ~/.config is a directory that means nothing to anyone (and that no
     system backup considers), and on macOS the convention is
     ~/Library/Application Support. Picking the wrong directory breaks nothing,
     but it leaves files where the user will never find them again.

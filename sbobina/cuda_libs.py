@@ -47,7 +47,8 @@ CTranslate2 ever asks for them — but they get there by different roads:
   nothing to register: it returns quietly and we run on CPU.
 
 Hence the rule that holds across the project: **no module-level
-`import ctranslate2`**. Everything goes through `backend.ensure_available()`,
+`import ctranslate2`, and no module-level `import faster_whisper` either**, which
+imports it on our behalf. Everything goes through `backend.ensure_available()`,
 which calls `register()` first. An import at the top of a file would run at
 package import time, that is, before the preload, and what follows is a bad
 error in both directions: on Linux CTranslate2 reports zero CUDA devices, which

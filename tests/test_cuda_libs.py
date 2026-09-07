@@ -124,7 +124,14 @@ def test_cudnn_is_not_preloaded_on_any_platform_because_ctranslate2_stopped_need
     assert [name for name in preloaded if "cudnn" in name.lower()] == []
 
 
-def test_no_module_in_the_package_imports_ctranslate2_at_module_level():
+# Importing either of these is importing ctranslate2: faster_whisper does it at its
+# own module level (faster_whisper/transcribe.py, reached from its __init__), so a
+# guard that names ctranslate2 alone lets `from faster_whisper import WhisperModel`
+# through — and that is the import the engine actually needs.
+_LOADS_CTRANSLATE2 = frozenset({"ctranslate2", "faster_whisper"})
+
+
+def test_no_module_in_the_package_imports_ctranslate2_at_module_level_directly_or_through_faster_whisper():
     """The invariant the whole module is built around, finally pinned down.
 
     `register()` has to run before ctranslate2 is imported, and a module-level import
@@ -136,8 +143,8 @@ def test_no_module_in_the_package_imports_ctranslate2_at_module_level():
     offenders = []
     for source in sorted(package.glob("*.py")):
         for node in ast.parse(source.read_text(encoding="utf-8")).body:
-            if isinstance(node, ast.Import) and any(a.name.split(".")[0] == "ctranslate2" for a in node.names):
+            if isinstance(node, ast.Import) and any(a.name.split(".")[0] in _LOADS_CTRANSLATE2 for a in node.names):
                 offenders.append(source.name)
-            if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "ctranslate2":
+            if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] in _LOADS_CTRANSLATE2:
                 offenders.append(source.name)
     assert offenders == []
