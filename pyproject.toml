@@ -1,0 +1,208 @@
+[project]
+name = "sbobina"
+version = "1.0.0"
+description = "Transcribes audio and video with Whisper, on any NVIDIA GPU and on CPU"
+readme = "README.md"
+authors = [{ name = "Efebia.com" }]
+# SPDX expression rather than the legacy license table: PEP 639, which hatchling
+# reads natively. license-files ships the LICENSE inside the wheel, so the terms
+# travel with the package and not only with the repo.
+license = "MIT"
+license-files = ["LICENSE"]
+# ytm pins >=3.14 because it runs on a single machine. Here the users are
+# colleagues, on hardware we do not choose: onnxruntime (a hard dependency of
+# faster-whisper, used by the VAD) has stopped publishing macOS x86_64 wheels,
+# so an Intel Mac has no valid combination on 3.14. The 3.11 floor leaves them
+# the `uv sync --python 3.11` escape hatch, which resolves an older onnxruntime
+# that does have Intel wheels. Everywhere else .python-version still leads to 3.14.
+requires-python = ">=3.11"
+dependencies = [
+    "faster-whisper>=1.2.1",
+    "rich>=14.0",
+    "rich-click>=1.9",
+    "structlog>=25.5.0",
+]
+
+[project.scripts]
+sbobina = "sbobina.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sbobina"]
+
+[dependency-groups]
+# The CUDA libraries as Python wheels, not as a CUDA Toolkit to install by hand:
+# it is the only way `uv sync` can be enough on Windows too, where nobody feels
+# like fixing their PATH. sbobina/cuda_libs.py then makes CTranslate2 find them.
+#
+# The darwin marker is not a detail: on macOS these wheels simply do not exist,
+# and without the marker `uv sync` would fail during resolution on the Mac
+# instead of falling back to CPU.
+#
+# cuBLAS alone, and that is a recent change. Up to CT2 4.6.2 cuDNN 9 was needed
+# too, so the group also carried `nvidia-cudnn-cu12>=9.0,<10` — the one exception
+# to the "floors only" rule — because CT2 was linked against the libcudnn.so.9
+# SONAME and cuDNN 10 would have failed at load time rather than during
+# resolution, which is much harder to diagnose for whoever is installing it.
+# CT2 4.6.3 (#1949, January 2026) reimplemented Conv1d in pure CUDA and made
+# cuDNN an optional dependency; we lock 4.8.2, whose binaries contain zero
+# references to cudnn on both Linux (libctranslate2.so) and Windows
+# (ctranslate2.dll). Dropping it saves 751 MB of download and 1.18 GB in the
+# venv, and a real GPU transcription was verified without it. If this project
+# ever has to go back below CT2 4.6.3, cuDNN 9 and its <10 ceiling come back
+# together with it — and so does the libcudnn.so.9 entry in cuda_libs.py.
+#
+# cuBLAS needs no such ceiling even though cuda_libs preloads it by SONAME too:
+# NVIDIA puts the CUDA major in the package name, so a cuBLAS 13 would be
+# published as `nvidia-cublas-cu13` and could never be resolved from here.
+cuda = [
+    "nvidia-cublas-cu12>=12.3; sys_platform != 'darwin'",
+]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.16",
+    # ty in the dev group rather than `uvx ty check`: uvx resolves its own copy
+    # outside uv.lock, so the version that gates a commit here and the one a
+    # colleague runs tomorrow are not the same program. Pinned like everything else.
+    "ty>=0.0.78",
+]
+
+[tool.uv]
+# The four machines this tool is meant to run on, declared so uv has to find a wheel
+# for each of them at lock time instead of only for the one doing the locking. It is
+# what makes the lockfile installable on an Intel Mac: without it uv locked the newest
+# onnxruntime, which ships no macOS x86_64 wheel and no sdist, and `uv sync` there died
+# in resolution — after the README had already promised it would work. It is also a
+# guardrail from now on: the day a dependency stops publishing wheels for one of these
+# four, `uv lock` fails here rather than on a colleague's laptop.
+required-environments = [
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'win32'  and platform_machine == 'AMD64'",
+    "sys_platform == 'linux'  and platform_machine == 'x86_64'",
+]
+# A GPU is the normal case: anyone without one runs `uv sync --no-group cuda` and
+# saves ~1 GB of wheels, but they should not need to know that to get it working.
+default-groups = ["cuda", "dev"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ty.environment]
+# The floor, not the version in .venv: this is the pyproject's requires-python, and
+# checking against 3.11 is what stops a 3.12-only construct from silently shipping
+# and breaking the Intel Mac escape hatch. The venv stays on .python-version (3.14).
+python-version = "3.11"
+# "all" rather than the platform of whoever runs the check: the code has branches
+# for Windows (os.add_dll_directory) and for POSIX (ctypes.RTLD_GLOBAL), and with
+# a fixed platform ty would flag half of cuda_libs as non-existent — precisely the
+# half that does not run on our laptops but does run on theirs.
+python-platform = "all"
+
+[tool.ty.terminal]
+# A warning that does not fail the check is a warning nobody reads.
+error-on-warning = true
+
+[tool.ty.rules]
+# Everything ty ships at "warn" promoted to "error". The default severities are
+# tuned for dropping ty into a large existing codebase; this one is 900 lines and
+# has no legacy to grandfather, so there is no reason to accept a lower bar.
+ambiguous-protocol-member = "error"
+deprecated = "error"
+experimental-syntax = "error"
+ignore-comment-unknown-rule = "error"
+ineffective-final = "error"
+invalid-enum-member-annotation = "error"
+invalid-ignore-comment = "error"
+invalid-legacy-positional-parameter = "error"
+invalid-named-tuple-override = "error"
+
+# Off by default, switched on deliberately:
+# a bare `ty: ignore` is the typed equivalent of a bare `noqa`, which the style
+# guide already rejects — an ignore has to name the rule it is silencing.
+blanket-ignore-comment = "error"
+# we own no `cast()` calls, so a disjoint one would mean someone added a lie.
+disjoint-cast = "error"
+
+# division-by-zero stays off: ty documents it as disabled for false positives, and
+# a rule that cries wolf is a rule people learn to run with --ignore.
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+docstring-code-line-length = 80
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    # --- messages/exceptions: inline strings in raises are readable, not a problem ---
+    "EM101",   # raw string in exception — the inline message reads better than a variable
+    "EM102",   # f-string in exception — same
+    "TRY003",  # long message outside the exception class — our exceptions carry their context in the message
+    # --- docstrings: required only where they earn it (modules with non-obvious design, public APIs) ---
+    "D100",    # module docstring everywhere — only modules with non-obvious design need one
+    "D103",    # docstring on every function — short functions with clear names do not need one
+    "D104",    # docstring in empty package __init__
+    "D107",    # docstring on __init__ — the class already documents it
+    # --- formatter conflicts: the formatter already handles commas and concatenation ---
+    "COM812",  # trailing comma — conflicts with ruff format
+    # --- internal project ---
+    "CPY001",  # copyright header — no licence headers here
+    "BLE001",  # except Exception — allowed at best-effort boundaries, always with a why-comment
+    # --- subprocess: argv is always a literal, never a shell ---
+    "S603",    # subprocess with "untrusted input" — fires on EVERY subprocess.run, even with a
+               # literal argv and a binary resolved through shutil.which. No user input ever passes here.
+    # --- deferred imports: the guide allows them for heavy/optional deps and to break cycles ---
+    "PLC0415", # import outside top-level — structural here: ctranslate2 must be imported ONLY after
+               # cuda_libs.register(), and an import at the top of a module would break that order.
+    # --- style we reject explicitly ---
+    "ERA001",  # commented-out code — why-comments sometimes quote code
+    "TC001",   # move imports into TYPE_CHECKING — banned: imports stay at the top, nothing lazy
+    "TC002",   # same for third-party
+    "TC003",   # same for stdlib
+]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"__future__.annotations".msg = "Banned in this setup: no lazy annotations (PEP 563)."
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["sbobina"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 6
+max-branches = 12
+max-statements = 50
+
+[tool.ruff.lint.per-file-ignores]
+"sbobina/cli.py" = [
+    "PLR0913", # too many arguments — click passes every option as a parameter: the number of
+               # arguments IS the command's interface, not a structural flaw.
+    "PLR0917", # same for positionals: click decides how the function gets called.
+    "FBT001", # boolean positional — `--check` and `--no-vad` are flags, and that is how click
+              # passes them. Making the signature keyword-only would change nothing for the real caller.
+]
+"tests/*" = [
+    "S101",    # assert is pytest's mechanism
+    "PLR2004", # magic values in tests: the expected numbers ARE the test
+    "ANN",     # tests do not need full annotations
+    "D",       # the sentence-shaped test names are the documentation
+    "ARG",     # fakes ignore arguments on purpose
+    "INP001",  # pytest finds tests without __init__.py
+    "SLF001",  # private member accessed — a test file exercising its own module's helpers is
+               # normal; the alternative is widening the public API just to make it reachable.
+]
